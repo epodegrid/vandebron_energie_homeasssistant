@@ -1,12 +1,12 @@
 {
   "domain": "vandebron_energie",
   "name": "Vandebron Energie",
-  "version": "0.3.0",
-  "documentation": "https://github.com/epodegrid/vandebron_energie_homeasssistant",
-  "issue_tracker": "https://github.com/epodegrid/vandebron_energie_homeasssistant/issues",
   "codeowners": ["@epodegrid"],
-  "requirements": [],
+  "config_flow": true,
   "dependencies": [],
+  "documentation": "https://github.com/epodegrid/vandebron_energie_homeasssistant",
   "iot_class": "cloud_polling",
-  "config_flow": true
+  "issue_tracker": "https://github.com/epodegrid/vandebron_energie_homeasssistant/issues",
+  "requirements": [],
+  "version": "0.3.1"
 }
