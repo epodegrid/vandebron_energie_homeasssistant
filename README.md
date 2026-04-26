@@ -47,10 +47,10 @@ pytest tests/
 
 ---
 
-[commits-shield]: https://img.shields.io/github/commit-activity/y/YOUR_GITHUB_USER/vandebron_energie_ha.svg
-[commits]: https://github.com/YOUR_GITHUB_USER/vandebron_energie_ha/commits/main
+[commits-shield]: https://img.shields.io/github/commit-activity/y/epodegrid/vandebron_energie_homeasssistant.svg
+[commits]: https://github.com/epodegrid/vandebron_energie_homeasssistant/commits/main
 [hacs]: https://hacs.xyz
 [hacsbadge]: https://img.shields.io/badge/HACS-Custom-orange.svg
-[license-shield]: https://img.shields.io/github/license/YOUR_GITHUB_USER/vandebron_energie_ha.svg
-[releases-shield]: https://img.shields.io/github/release/YOUR_GITHUB_USER/vandebron_energie_ha.svg
-[releases]: https://github.com/YOUR_GITHUB_USER/vandebron_energie_ha/releases
+[license-shield]: https://img.shields.io/github/license/epodegrid/vandebron_energie_homeasssistant.svg
+[releases-shield]: https://img.shields.io/github/release/epodegrid/vandebron_energie_homeasssistant.svg
+[releases]: https://github.com/epodegrid/vandebron_energie_homeasssistant/releases
