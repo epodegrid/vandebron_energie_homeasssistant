@@ -20,7 +20,7 @@ A Home Assistant integration for [Vandebron](https://vandebron.nl) energy data.
 
 1. Open HACS in Home Assistant.
 2. Go to **Integrations** → click the three-dot menu → **Custom repositories**.
-3. Add `https://github.com/YOUR_GITHUB_USER/vandebron_energie_ha` with category **Integration**.
+3. Add `https://github.com/epodegrid/vandebron_energie_homeassistant` with category **Integration**.
 4. Search for **Vandebron Energie** and install it.
 5. Restart Home Assistant.
 
