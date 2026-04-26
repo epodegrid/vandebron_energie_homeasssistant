@@ -1,0 +1,36 @@
+---
+name: HACS and Hassfest Validation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - custom_components/vandebron_energie/**
+      - .github/workflows/validate.yaml
+  pull_request:
+    paths:
+      - custom_components/vandebron_energie/**
+      - .github/workflows/validate.yaml
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  hacs:
+    name: HACS Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run HACS Validation
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Hassfest Validation
+        uses: home-assistant/actions/hassfest@master

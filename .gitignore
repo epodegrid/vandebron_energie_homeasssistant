@@ -1,0 +1,25 @@
+.git/
+__pycache__/
+
+# HA dev container runtime data — keep config.yaml but not generated state
+config/.storage/
+config/home-assistant.log*
+config/home-assistant_v2.db*
+config/tts/
+config/.cloud/
+
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+*.egg-info/
+.env
+.venv/
+venv/
+
+config/
+.devcontainer/

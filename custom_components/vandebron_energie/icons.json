@@ -1,0 +1,17 @@
+{
+  "entity": {
+    "sensor": {
+      "electricity_today_peak": { "default": "mdi:lightning-bolt" },
+      "electricity_today_off_peak": { "default": "mdi:lightning-bolt-outline" },
+      "electricity_today_total": { "default": "mdi:home-lightning-bolt" },
+      "electricity_month_peak": { "default": "mdi:lightning-bolt" },
+      "electricity_month_off_peak": { "default": "mdi:lightning-bolt-outline" },
+      "electricity_month_total": { "default": "mdi:home-lightning-bolt" },
+      "electricity_month_expected": { "default": "mdi:chart-timeline-variant" },
+      "electricity_today_cost": { "default": "mdi:currency-eur" },
+      "electricity_month_cost": { "default": "mdi:currency-eur" },
+      "electricity_month_expected_cost": { "default": "mdi:chart-line" },
+      "gas_today": { "default": "mdi:fire" }
+    }
+  }
+}

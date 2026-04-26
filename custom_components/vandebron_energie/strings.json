@@ -1,0 +1,47 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Vandebron",
+        "description": "Enter the same username and password you use to log in to mijn.vandebron.nl.",
+        "data": {
+          "username": "Email address",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Vandebron. Check your internet connection.",
+      "invalid_auth": "Invalid email address or password.",
+      "unknown": "Unexpected error. Check the Home Assistant logs for details."
+    },
+    "abort": {
+      "already_configured": "This Vandebron account is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Vandebron Energie options",
+        "data": {
+          "scan_interval": "Update interval (seconds, minimum 300)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "electricity_today_peak": { "name": "Electricity today (peak)" },
+      "electricity_today_off_peak": { "name": "Electricity today (off-peak)" },
+      "electricity_today_total": { "name": "Electricity today (total)" },
+      "electricity_month_peak": { "name": "Electricity this month (peak)" },
+      "electricity_month_off_peak": { "name": "Electricity this month (off-peak)" },
+      "electricity_month_total": { "name": "Electricity this month (total)" },
+      "electricity_month_expected": { "name": "Electricity expected this month" },
+      "electricity_today_cost": { "name": "Electricity cost today" },
+      "electricity_month_cost": { "name": "Electricity cost this month" },
+      "electricity_month_expected_cost": { "name": "Electricity expected monthly cost" },
+      "gas_today": { "name": "Gas today" }
+    }
+  }
+}

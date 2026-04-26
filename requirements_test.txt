@@ -1,0 +1,7 @@
+homeassistant
+pytest-homeassistant-custom-component
+pytest
+pytest-asyncio
+pytest-cov
+aiohttp
+aioresponses

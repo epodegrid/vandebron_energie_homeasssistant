@@ -1,0 +1,16 @@
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: vandebron_ha_dev
+    volumes:
+      # HA config directory (persistent — stores UI config, auth, etc.)
+      - ./config:/config
+      # Live-mount the custom component so file edits are reflected immediately
+      - ./custom_components/vandebron_energie:/config/custom_components/vandebron_energie
+    ports:
+      - "8123:8123"
+    environment:
+      - TZ=Europe/Amsterdam
+    restart: unless-stopped
+    # Required on macOS/Linux for host network access
+    privileged: false
