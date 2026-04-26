@@ -1,7 +1,7 @@
 {
   "domain": "vandebron_energie",
   "name": "Vandebron Energie",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "documentation": "https://github.com/YOUR_GITHUB_USER/vandebron_energie_ha",
   "issue_tracker": "https://github.com/YOUR_GITHUB_USER/vandebron_energie_ha/issues",
   "codeowners": ["@YOUR_GITHUB_USER"],
