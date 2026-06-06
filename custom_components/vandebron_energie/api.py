@@ -5,84 +5,38 @@ All data calls use that token against the mijn.vandebron.nl API.
 """
 from __future__ import annotations
 
-import html as html_module
 import logging
-import re
-import uuid
-from dataclasses import dataclass, field
-from datetime import date, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
+_NL_TZ = ZoneInfo("Europe/Amsterdam")
 
-_AUTH_URL = "https://vandebron.nl/auth/realms/vandebron/protocol/openid-connect/auth"
+
+def is_nl_peak_hour() -> bool:
+    """Return True during peak tariff hours: Mon–Fri 07:00–23:00 Amsterdam time."""
+    now = datetime.now(_NL_TZ)
+    if now.weekday() >= 5:  # Saturday=5, Sunday=6
+        return False
+    return 7 <= now.hour < 23
+
 _TOKEN_URL = "https://vandebron.nl/auth/realms/vandebron/protocol/openid-connect/token"
 _USER_INFO_URL = "https://mijn.vandebron.nl/api/authentication/userinfo"
 _ENERGY_CONSUMERS_URL = "https://mijn.vandebron.nl/api/v1/energyConsumers/{org_id}"
 _USAGE_URL = "https://mijn.vandebron.nl/api/consumers/{user_id}/connections/{conn_id}/usage"
-_DASHBOARD_URL = "https://mijn.vandebron.nl/api/consumers/{user_id}/dashboard"
+# org_id-scoped endpoint that returns per-day variable + fixed costs
+_COSTS_V2_URL = "https://mijn.vandebron.nl/api/v2/consumers/{org_id}/connections/costs"
+# Projects variable + fixed costs for the full billing period
+_EXPECTED_COSTS_URL = "https://mijn.vandebron.nl/api/consumers/{user_id}/connections/{conn_id}/expectedcosts"
+# Per-component contract prices (energy + ODN + tax) as of a given date
+_CONTRACT_PRICES_URL = "https://mijn.vandebron.nl/api/v1/energyConsumers/{org_id}/contracts/{contract_id}/prices"
 
 MARKET_ELECTRICITY = "electricity"
 MARKET_GAS = "gas"
-
-# Current NL energy VAT rate
-_VAT = 0.09
-
-
-@dataclass
-class TariffRates:
-    """Electricity tariff rates extracted from the Vandebron dashboard currentCosts."""
-
-    # Per-kWh rates, excl. VAT
-    peak_per_kwh: float = 0.0          # Energy component (piek)
-    off_peak_per_kwh: float = 0.0      # Energy component (dal)
-    premium_per_kwh: float = 0.0       # Vandebron renewable premium
-    peak_odn_per_kwh: float = 0.0      # Grid transport (piek)
-    off_peak_odn_per_kwh: float = 0.0  # Grid transport (dal)
-
-    # Annual charges, excl. VAT
-    fixed_fee_per_year: float = 0.0    # Standing charge (vastrecht)
-    tax_credit_per_year: float = 0.0   # Energy tax rebate (belastingkorting), typically negative
-
-    # Vandebron's own forward-looking monthly cost calculation
-    advance_payment_monthly: float = 0.0
-
-    # SJV — Standard Annual Usage profile
-    annual_peak_kwh: float = 0.0
-    annual_off_peak_kwh: float = 0.0
-
-    @property
-    def total_peak_rate(self) -> float:
-        """All-in cost per peak kWh, including VAT."""
-        return (self.peak_per_kwh + self.premium_per_kwh + self.peak_odn_per_kwh) * (1 + _VAT)
-
-    @property
-    def total_off_peak_rate(self) -> float:
-        """All-in cost per off-peak kWh, including VAT."""
-        return (self.off_peak_per_kwh + self.premium_per_kwh + self.off_peak_odn_per_kwh) * (1 + _VAT)
-
-    @property
-    def monthly_fixed_cost(self) -> float:
-        """Monthly standing charge + tax rebate, including VAT."""
-        return ((self.fixed_fee_per_year + self.tax_credit_per_year) / 12) * (1 + _VAT)
-
-    @property
-    def annual_expected_kwh(self) -> float:
-        return self.annual_peak_kwh + self.annual_off_peak_kwh
-
-    def variable_cost(self, peak_kwh: float, off_peak_kwh: float) -> float:
-        """Variable cost for given kWh, including VAT."""
-        return (
-            peak_kwh * self.total_peak_rate
-            + off_peak_kwh * self.total_off_peak_rate
-        )
-
-    def total_monthly_cost(self, peak_kwh: float, off_peak_kwh: float) -> float:
-        """Variable cost + proportional fixed charges, including VAT."""
-        return self.variable_cost(peak_kwh, off_peak_kwh) + self.monthly_fixed_cost
 
 
 @dataclass
@@ -91,6 +45,7 @@ class Connection:
 
     market_segment: str  # MARKET_ELECTRICITY or MARKET_GAS
     conn_id: str
+    contract_id: str | None = None
 
 
 @dataclass
@@ -117,6 +72,9 @@ class UsageData:
 
     # ---------- Expected (SJV) ----------
     electricity_month_expected_kwh: float | None = None  # annual SJV ÷ 12
+
+    # ---------- Real-time ----------
+    electricity_current_rate_eur: float | None = None   # all-in rate right now (unavailable when dashboard is broken)
 
 
 class VandebronApiError(Exception):
@@ -152,80 +110,26 @@ class VandebronApi:
     # ------------------------------------------------------------------
 
     async def authenticate(self) -> None:
-        """Full OIDC code-flow login. Populates self._token / user info."""
-        async with aiohttp.ClientSession(
-            cookie_jar=aiohttp.CookieJar(unsafe=True)
-        ) as auth_session:
-            login_url = await self._get_login_url(auth_session)
-            auth_code = await self._get_auth_code(auth_session, login_url)
-            self._token = await self._exchange_code(auth_session, auth_code)
-
-        await self._fetch_user_info()
-
-    async def _get_login_url(self, session: aiohttp.ClientSession) -> str:
-        params = {
-            "client_id": "website",
-            "redirect_uri": "https://mijn.vandebron.nl/",
-            "state": str(uuid.uuid4()),
-            "response_mode": "fragment",
-            "response_type": "code",
-            "scope": "openid",
-            "nonce": str(uuid.uuid4()),
-        }
-        async with session.get(_AUTH_URL, params=params) as resp:
-            resp.raise_for_status()
-            text = await resp.text()
-
-        match = re.search(r'<form[^>]+action="([^"]+)"', text)
-        if not match:
-            raise VandebronAuthError("Could not find login form on Keycloak auth page")
-        return html_module.unescape(match.group(1))
-
-    async def _get_auth_code(
-        self, session: aiohttp.ClientSession, login_url: str
-    ) -> str:
-        async with session.post(
-            login_url,
-            data={
-                "username": self._username,
-                "password": self._password,
-                "login": "Log in",
-            },
-            allow_redirects=False,
-        ) as resp:
-            if resp.status not in (301, 302):
-                raise VandebronAuthError(
-                    f"Login failed — expected redirect, got {resp.status}. "
-                    "Check your username and password."
-                )
-            location = resp.headers.get("Location", "")
-
-        parsed = urlparse(location)
-        params = parse_qs(parsed.fragment)
-        if "code" not in params:
-            raise VandebronAuthError(
-                "No authorization code in redirect after login."
-            )
-        return params["code"][0]
-
-    async def _exchange_code(
-        self, session: aiohttp.ClientSession, auth_code: str
-    ) -> str:
-        async with session.post(
+        """Authenticate via OIDC direct password grant. Populates self._token."""
+        async with self._session.post(
             _TOKEN_URL,
             data={
-                "grant_type": "authorization_code",
+                "grant_type": "password",
                 "client_id": "website",
-                "code": auth_code,
-                "redirect_uri": "https://mijn.vandebron.nl/",
+                "username": self._username,
+                "password": self._password,
+                "scope": "openid",
             },
         ) as resp:
+            if resp.status in (401, 403):
+                raise VandebronAuthError("Invalid Vandebron credentials")
             resp.raise_for_status()
             data = await resp.json()
 
         if "access_token" not in data:
             raise VandebronAuthError("Token endpoint did not return an access_token")
-        return str(data["access_token"])
+        self._token = str(data["access_token"])
+        await self._fetch_user_info()
 
     async def _fetch_user_info(self) -> None:
         async with self._session.get(
@@ -238,82 +142,79 @@ class VandebronApi:
         self._org_id = data["organizationId"]
 
     # ------------------------------------------------------------------
-    # Dashboard / tariffs
+    # Costs
     # ------------------------------------------------------------------
 
-    async def get_dashboard(self) -> dict[str, Any]:
-        """Fetch the user dashboard (contains tariffs, SJV usage, advance payment)."""
-        url = _DASHBOARD_URL.format(user_id=self._user_id)
-        async with self._session.get(url, headers=self._auth_headers) as resp:
-            resp.raise_for_status()
+    async def get_costs(
+        self, conn_ids: list[str], start: date, end: date
+    ) -> dict[str, Any]:
+        """Fetch per-day variable + fixed costs for the given connections and date range."""
+        url = _COSTS_V2_URL.format(org_id=self._org_id)
+        async with self._session.get(
+            url,
+            params={
+                "connectionIds": ",".join(conn_ids),
+                "startDate": start.isoformat(),
+                "endDate": end.isoformat(),
+            },
+            headers=self._auth_headers,
+        ) as resp:
+            if resp.status != 200:
+                _LOGGER.warning("Costs v2 returned %s — cost sensors will be unavailable", resp.status)
+                return {}
             return await resp.json()
 
-    def _parse_tariff_rates(self, dashboard: dict[str, Any]) -> TariffRates | None:
-        """Extract tariff rates and SJV from the dashboard connection data."""
-        try:
-            addrs = dashboard.get("shippingAddresses", [])
-            if not addrs:
+    async def get_expected_costs(
+        self, conn_id: str, start: date, end: date
+    ) -> dict[str, Any]:
+        """Fetch projected variable + fixed costs for the full billing period."""
+        url = _EXPECTED_COSTS_URL.format(user_id=self._user_id, conn_id=conn_id)
+        async with self._session.get(
+            url,
+            params={
+                "startDate": start.isoformat(),
+                "endDate": end.isoformat(),
+                "billAsSingle": "true",
+            },
+            headers=self._auth_headers,
+        ) as resp:
+            if resp.status != 200:
+                _LOGGER.warning("Expected costs returned %s", resp.status)
+                return {}
+            return await resp.json()
+
+    async def get_monthly_sjv_kwh(
+        self, conn_id: str, month_start: date, next_month_start: date
+    ) -> float | None:
+        """Sum sjvEstimatedConsumption for every day in the current month.
+
+        The ff=true flag returns SJV-profile estimates for future days alongside
+        actuals for past days. Summing all sjvEstimatedConsumption values gives
+        the expected monthly consumption the Vandebron frontend displays.
+        """
+        url = _USAGE_URL.format(user_id=self._user_id, conn_id=conn_id)
+        async with self._session.get(
+            url,
+            params={
+                "resolution": "Days",
+                "startDate": month_start.isoformat(),
+                "endDate": next_month_start.isoformat(),
+                "ff": "true",
+            },
+            headers=self._auth_headers,
+        ) as resp:
+            if resp.status != 200:
+                _LOGGER.warning("SJV forecast returned %s", resp.status)
                 return None
+            data = await resp.json()
 
-            addr = addrs[0]
-            conns = addr.get("connections", [])
-            electricity_conn = next(
-                (c for c in conns if c.get("marketSegment", "").lower() == MARKET_ELECTRICITY),
-                None,
-            )
-            if not electricity_conn:
-                return None
-
-            costs: list[dict[str, Any]] = electricity_conn.get("currentCosts", [])
-            sjv = electricity_conn.get("annualStandardUsage", {})
-            adv = addr.get("advancePayment", {}).get("currentAdvancePayment", {})
-
-            rates = TariffRates(
-                annual_peak_kwh=float(sjv.get("peakUsage") or 0),
-                annual_off_peak_kwh=float(sjv.get("offPeakUsage") or 0),
-                advance_payment_monthly=float(adv.get("calculatedAmount") or 0),
-            )
-
-            # De-duplicate by component type and accumulate per-kWh rates
-            seen: set[str] = set()
-            for item in costs:
-                ptype = item.get("priceComponentType", "")
-                price = float(item.get("price") or 0)
-                unit = item.get("priceUnit", "")
-                if ptype in seen:
-                    continue
-                seen.add(ptype)
-
-                if ptype == "Peak" and unit == "KWh":
-                    rates.peak_per_kwh = price
-                elif ptype == "OffPeak" and unit == "KWh":
-                    rates.off_peak_per_kwh = price
-                elif ptype == "Premium" and unit == "KWh":
-                    rates.premium_per_kwh = price
-                elif ptype == "PeakODN" and unit == "KWh":
-                    rates.peak_odn_per_kwh = price
-                elif ptype == "OffPeakODN" and unit == "KWh":
-                    rates.off_peak_odn_per_kwh = price
-                elif ptype == "FixedFee" and unit == "Year":
-                    rates.fixed_fee_per_year = price
-                elif ptype == "TaxCredit" and unit == "Year":
-                    rates.tax_credit_per_year = price  # negative value
-
-            _LOGGER.debug(
-                "Tariff rates: peak=%.5f off_peak=%.5f premium=%.5f "
-                "peak_odn=%.5f off_peak_odn=%.5f fixed=%.2f/yr credit=%.2f/yr "
-                "advance=%.2f/mo SJV=%.0f+%.0f kWh/yr",
-                rates.peak_per_kwh, rates.off_peak_per_kwh, rates.premium_per_kwh,
-                rates.peak_odn_per_kwh, rates.off_peak_odn_per_kwh,
-                rates.fixed_fee_per_year, rates.tax_credit_per_year,
-                rates.advance_payment_monthly,
-                rates.annual_peak_kwh, rates.annual_off_peak_kwh,
-            )
-            return rates
-
-        except Exception:
-            _LOGGER.warning("Could not parse tariff rates from dashboard", exc_info=True)
-            return None
+        unit = data.get("unit", "WH")
+        divisor = 1000.0 if unit.upper() == "WH" else 1.0
+        total = sum(
+            float(v.get("sjvEstimatedConsumption") or 0)
+            for v in data.get("values", [])
+        ) / divisor
+        return round(total, 1) if total > 0 else None
 
     # ------------------------------------------------------------------
     # Usage data
@@ -333,6 +234,7 @@ class VandebronApi:
                     Connection(
                         market_segment=con["marketSegment"],
                         conn_id=con["connectionId"],
+                        contract_id=(con.get("contract") or {}).get("contractId"),
                     )
                 )
         return connections
@@ -391,12 +293,66 @@ class VandebronApi:
             4,
         )
 
+    async def get_contract_prices(self, contract_id: str) -> list[dict[str, Any]]:
+        """Fetch price components for the given contract as of today."""
+        url = _CONTRACT_PRICES_URL.format(org_id=self._org_id, contract_id=contract_id)
+        async with self._session.get(
+            url,
+            params={"priceDate": date.today().isoformat()},
+            headers=self._auth_headers,
+        ) as resp:
+            if resp.status != 200:
+                _LOGGER.warning("Contract prices returned %s", resp.status)
+                return []
+            return await resp.json()
+
+    def _parse_current_rates(
+        self, prices: list[dict[str, Any]]
+    ) -> tuple[float | None, float | None]:
+        """Return (peak_rate_eur, off_peak_rate_eur) incl. VAT from contract prices.
+
+        Rate = energy_component.priceTaxed + lowest-range EnergyTax.priceTaxed.
+        Matches the "total delivery price" shown in the Vandebron frontend.
+        Falls back to Base when Peak/OffPeak are absent (single-tariff meters).
+        """
+        peak_taxed: float | None = None
+        off_peak_taxed: float | None = None
+        base_taxed: float | None = None
+        energy_tax_taxed: float | None = None
+        energy_tax_min_range: int = 999_999_999
+
+        for item in prices:
+            ptype = item.get("priceComponentType", "")
+            if item.get("priceUnit") != "KWh":
+                continue
+            price_taxed = float(item.get("priceTaxed") or 0)
+            if ptype == "Peak":
+                peak_taxed = price_taxed
+            elif ptype == "OffPeak":
+                off_peak_taxed = price_taxed
+            elif ptype == "Base":
+                base_taxed = price_taxed
+            elif ptype == "EnergyTax":
+                range_begin = int(item.get("rangeBegin") or 0)
+                if range_begin < energy_tax_min_range:
+                    energy_tax_taxed = price_taxed
+                    energy_tax_min_range = range_begin
+
+        tax = energy_tax_taxed or 0.0
+        peak = peak_taxed if peak_taxed is not None else base_taxed
+        off_peak = off_peak_taxed if off_peak_taxed is not None else base_taxed
+
+        return (
+            round(peak + tax, 5) if peak is not None else None,
+            round(off_peak + tax, 5) if off_peak is not None else None,
+        )
+
     # ------------------------------------------------------------------
     # Main data fetch
     # ------------------------------------------------------------------
 
     async def fetch_all_data(self) -> UsageData:
-        """Fetch daily usage, monthly usage, tariffs and derived costs.
+        """Fetch daily usage, monthly usage and costs.
 
         Vandebron has ~1 day lag on smart meter readings: today's consumptionPeak
         and consumptionOffPeak are often zero until the next day. We try today
@@ -405,12 +361,10 @@ class VandebronApi:
         today = date.today()
         yesterday = today - timedelta(days=1)
         month_start = today.replace(day=1)
+        next_month_start = (month_start + timedelta(days=32)).replace(day=1)
 
         connections = await self.get_connections()
         _LOGGER.debug("Found %d connection(s): %s", len(connections), connections)
-
-        dashboard = await self.get_dashboard()
-        tariff = self._parse_tariff_rates(dashboard)
 
         result = UsageData()
 
@@ -481,35 +435,63 @@ class VandebronApi:
             result.electricity_month_off_peak_kwh,
         )
 
-        # --- Costs and forecasts ---
-        if tariff is not None:
-            # Daily variable cost (for the daily reading date)
-            result.electricity_today_cost_eur = round(
-                tariff.variable_cost(
-                    result.electricity_peak_kwh,
-                    result.electricity_off_peak_kwh,
-                ),
-                2,
-            )
+        # --- Costs from the v2 costs API ---
+        elec_conns = [c for c in connections if c.market_segment.lower() == MARKET_ELECTRICITY]
+        if elec_conns:
+            elec_conn_ids = [c.conn_id for c in elec_conns]
+            costs_data = await self.get_costs(elec_conn_ids, month_start, today)
 
-            # Month-to-date cost (variable + proportional fixed charges)
-            result.electricity_month_cost_eur = round(
-                tariff.total_monthly_cost(
-                    result.electricity_month_peak_kwh,
-                    result.electricity_month_off_peak_kwh,
-                ),
-                2,
-            )
+            total_variable = float(costs_data.get("totalVariable") or 0.0)
+            total_fixed = float(costs_data.get("totalFixed") or 0.0)
 
-            # Expected full-month cost: Vandebron's own advance payment calculation
-            result.electricity_month_expected_cost_eur = round(
-                tariff.advance_payment_monthly, 2
-            )
+            if costs_data:
+                # Month-to-date cost = sum of all daily entries
+                result.electricity_month_cost_eur = round(total_variable + total_fixed, 2)
 
-            # Expected monthly kWh from SJV annual profile ÷ 12
-            if tariff.annual_expected_kwh > 0:
-                result.electricity_month_expected_kwh = round(
-                    tariff.annual_expected_kwh / 12, 1
+                # Today's cost: find the per-day entry matching data_date
+                if result.data_date:
+                    for conn_cost in costs_data.get("costs", []):
+                        for day_val in conn_cost.get("values", []):
+                            try:
+                                reading_date = date.fromisoformat(day_val["readingDate"][:10])
+                            except (KeyError, ValueError):
+                                continue
+                            if reading_date == result.data_date:
+                                result.electricity_today_cost_eur = round(
+                                    float(day_val.get("variableCosts") or 0)
+                                    + float(day_val.get("fixedCosts") or 0),
+                                    2,
+                                )
+                                break
+
+            # Expected full-month cost and SJV kWh forecast
+            expected_data = await self.get_expected_costs(
+                elec_conns[0].conn_id, month_start, next_month_start
+            )
+            if expected_data:
+                result.electricity_month_expected_cost_eur = round(
+                    float(expected_data.get("expectedVariableCosts") or 0)
+                    + float(expected_data.get("expectedFixedCosts") or 0),
+                    2,
                 )
+
+            result.electricity_month_expected_kwh = await self.get_monthly_sjv_kwh(
+                elec_conns[0].conn_id, month_start, next_month_start
+            )
+
+            # Real-time tariff rate
+            if elec_conns[0].contract_id:
+                prices = await self.get_contract_prices(elec_conns[0].contract_id)
+                peak_rate, off_peak_rate = self._parse_current_rates(prices)
+                result.electricity_current_rate_eur = (
+                    peak_rate if is_nl_peak_hour() else off_peak_rate
+                )
+
+            _LOGGER.debug(
+                "Costs: today=%.2f month=%.2f expected=%.2f",
+                result.electricity_today_cost_eur or 0,
+                result.electricity_month_cost_eur or 0,
+                result.electricity_month_expected_cost_eur or 0,
+            )
 
         return result

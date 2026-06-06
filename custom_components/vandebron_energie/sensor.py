@@ -132,10 +132,22 @@ SENSORS: tuple[VandebronSensorEntityDescription, ...] = (
         key="electricity_month_expected_cost",
         translation_key="electricity_month_expected_cost",
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.MEASUREMENT,
+        state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=CURRENCY_EUR,
         suggested_display_precision=2,
         value_fn=lambda d: d.electricity_month_expected_cost_eur,
+    ),
+    # ------------------------------------------------------------------
+    # Real-time tariff
+    # ------------------------------------------------------------------
+    VandebronSensorEntityDescription(
+        key="electricity_current_rate",
+        translation_key="electricity_current_rate",
+        # No device_class — EUR/kWh is a unit rate, not a monetary total
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="EUR/kWh",
+        suggested_display_precision=4,
+        value_fn=lambda d: d.electricity_current_rate_eur,
     ),
     # ------------------------------------------------------------------
     # Gas (only created when the account has a gas contract)

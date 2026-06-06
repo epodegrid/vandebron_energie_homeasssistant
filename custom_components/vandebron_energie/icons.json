@@ -1,5 +1,14 @@
 {
   "entity": {
+    "binary_sensor": {
+      "is_peak_hour": {
+        "default": "mdi:clock-alert",
+        "state": {
+          "on": "mdi:clock-alert",
+          "off": "mdi:clock-outline"
+        }
+      }
+    },
     "sensor": {
       "electricity_today_peak": { "default": "mdi:lightning-bolt" },
       "electricity_today_off_peak": { "default": "mdi:lightning-bolt-outline" },
@@ -11,6 +20,7 @@
       "electricity_today_cost": { "default": "mdi:currency-eur" },
       "electricity_month_cost": { "default": "mdi:currency-eur" },
       "electricity_month_expected_cost": { "default": "mdi:chart-line" },
+      "electricity_current_rate": { "default": "mdi:tag-outline" },
       "gas_today": { "default": "mdi:fire" }
     }
   }

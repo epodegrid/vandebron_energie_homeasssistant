@@ -30,6 +30,15 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "is_peak_hour": {
+        "name": "Peak tariff hour",
+        "state": {
+          "on": "Peak (piek)",
+          "off": "Off-peak (dal)"
+        }
+      }
+    },
     "sensor": {
       "electricity_today_peak": { "name": "Electricity today (peak)" },
       "electricity_today_off_peak": { "name": "Electricity today (off-peak)" },
@@ -41,6 +50,7 @@
       "electricity_today_cost": { "name": "Electricity cost today" },
       "electricity_month_cost": { "name": "Electricity cost this month" },
       "electricity_month_expected_cost": { "name": "Electricity expected monthly cost" },
+      "electricity_current_rate": { "name": "Electricity rate now" },
       "gas_today": { "name": "Gas today" }
     }
   }
