@@ -5,10 +5,24 @@ import aiohttp
 import pytest
 
 from homeassistant import config_entries
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
+from custom_components.vandebron_energie.api import VandebronAuthError
 from custom_components.vandebron_energie.const import DOMAIN
+
+_CREDENTIALS = {CONF_USERNAME: "user@example.com", CONF_PASSWORD: "s3cr3t"}
+
+
+def _mock_api(authenticate_side_effect=None):
+    """Return a patched VandebronApi class whose authenticate() can be controlled."""
+    mock = AsyncMock()
+    if authenticate_side_effect:
+        mock.authenticate.side_effect = authenticate_side_effect
+    else:
+        mock.authenticate.return_value = None
+    return mock
 
 
 async def test_form_success(hass: HomeAssistant) -> None:
@@ -21,35 +35,33 @@ async def test_form_success(hass: HomeAssistant) -> None:
     assert result["errors"] == {}
 
     with patch(
-        "custom_components.vandebron_energie.config_flow._validate_api_key",
-        return_value=None,
+        "custom_components.vandebron_energie.config_flow.VandebronApi",
+        return_value=_mock_api(),
     ), patch(
         "custom_components.vandebron_energie.async_setup_entry",
         return_value=True,
     ):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {"api_key": "test-api-key-123"},
+            result["flow_id"], _CREDENTIALS
         )
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Vandebron Energie"
-    assert result["data"] == {"api_key": "test-api-key-123"}
+    assert result["title"] == f"Vandebron ({_CREDENTIALS[CONF_USERNAME]})"
+    assert result["data"] == _CREDENTIALS
 
 
 async def test_form_invalid_auth(hass: HomeAssistant) -> None:
-    """Test that invalid auth shows the correct error."""
+    """Test that invalid credentials show the correct error."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
     with patch(
-        "custom_components.vandebron_energie.config_flow._validate_api_key",
-        side_effect=aiohttp.ClientResponseError(None, None, status=401),
+        "custom_components.vandebron_energie.config_flow.VandebronApi",
+        return_value=_mock_api(authenticate_side_effect=VandebronAuthError("bad creds")),
     ):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {"api_key": "wrong-key"},
+            result["flow_id"], _CREDENTIALS
         )
 
     assert result["type"] == FlowResultType.FORM
@@ -63,12 +75,11 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
     )
 
     with patch(
-        "custom_components.vandebron_energie.config_flow._validate_api_key",
-        side_effect=aiohttp.ClientError,
+        "custom_components.vandebron_energie.config_flow.VandebronApi",
+        return_value=_mock_api(authenticate_side_effect=aiohttp.ClientError),
     ):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {"api_key": "some-key"},
+            result["flow_id"], _CREDENTIALS
         )
 
     assert result["type"] == FlowResultType.FORM

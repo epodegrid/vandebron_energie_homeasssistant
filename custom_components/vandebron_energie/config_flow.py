@@ -7,7 +7,11 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+try:
+    from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+except ImportError:  # HA < 2024.4 (Python 3.11 dev environments)
+    from homeassistant.config_entries import ConfigFlow, OptionsFlow  # type: ignore[assignment]
+    from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult  # type: ignore[assignment]
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 
