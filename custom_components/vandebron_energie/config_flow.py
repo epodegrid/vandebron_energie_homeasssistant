@@ -2,73 +2,88 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import aiohttp
 import voluptuous as vol
 
 try:
-    from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+    from homeassistant.config_entries import ConfigFlowResult, OptionsFlow
 except ImportError:  # HA < 2024.4 (Python 3.11 dev environments)
-    from homeassistant.config_entries import ConfigFlow, OptionsFlow  # type: ignore[assignment]
+    from homeassistant.config_entries import OptionsFlow  # type: ignore[assignment]
     from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult  # type: ignore[assignment]
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.core import callback
+from homeassistant.helpers import config_entry_oauth2_flow
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import VandebronApi, VandebronApiError, VandebronAuthError
 from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .oauth import VandebronOAuth2Implementation
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_USERNAME): str,
-        vol.Required(CONF_PASSWORD): str,
-    }
-)
 
+class VandebronEnergieConfigFlow(
+    config_entry_oauth2_flow.AbstractOAuth2FlowHandler, domain=DOMAIN
+):
+    """Handle a config flow for Vandebron Energie (OAuth2 + PKCE, 2FA-capable)."""
 
-class VandebronEnergieConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Vandebron Energie."""
-
+    DOMAIN = DOMAIN
     VERSION = 1
+
+    @property
+    def logger(self) -> logging.Logger:
+        return _LOGGER
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the initial step."""
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            # Validate credentials with a short-lived session
-            async with aiohttp.ClientSession() as session:
-                api = VandebronApi(
-                    session,
-                    user_input[CONF_USERNAME],
-                    user_input[CONF_PASSWORD],
-                )
-                try:
-                    await api.authenticate()
-                except VandebronAuthError:
-                    errors["base"] = "invalid_auth"
-                except (VandebronApiError, aiohttp.ClientError):
-                    errors["base"] = "cannot_connect"
-                except Exception:
-                    _LOGGER.exception("Unexpected error during Vandebron setup")
-                    errors["base"] = "unknown"
-                else:
-                    await self.async_set_unique_id(user_input[CONF_USERNAME].lower())
-                    self._abort_if_unique_id_configured()
-                    return self.async_create_entry(
-                        title=f"Vandebron ({user_input[CONF_USERNAME]})",
-                        data=user_input,
-                    )
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
-            errors=errors,
+        """Register the implementation: async_setup has not run before the first flow."""
+        implementations = await config_entry_oauth2_flow.async_get_implementations(
+            self.hass, DOMAIN
         )
+        if DOMAIN not in implementations:
+            config_entry_oauth2_flow.async_register_implementation(
+                self.hass, DOMAIN, VandebronOAuth2Implementation(self.hass)
+            )
+        return await super().async_step_user(user_input)
+
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Re-login, e.g. for entries created with a password before 2FA."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is None:
+            return self.async_show_form(step_id="reauth_confirm")
+        return await self.async_step_user()
+
+    async def async_oauth_create_entry(self, data: dict[str, Any]) -> ConfigFlowResult:
+        """Create or update the entry once the user has logged in."""
+        api = VandebronApi(async_get_clientsession(self.hass))
+        api.set_token(data["token"]["access_token"])
+        try:
+            info = await api.fetch_user_info()
+        except VandebronAuthError:
+            return self.async_abort(reason="invalid_auth")
+        except (VandebronApiError, aiohttp.ClientError):
+            return self.async_abort(reason="cannot_connect")
+
+        email = info["email"]
+        await self.async_set_unique_id(email.lower())
+
+        if self.source == SOURCE_REAUTH:
+            self._abort_if_unique_id_mismatch(reason="wrong_account")
+            entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+            return self.async_update_reload_and_abort(entry, data=data)
+
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=f"Vandebron ({email})", data=data)
 
     @staticmethod
     @callback

@@ -3,7 +3,7 @@
   "name": "Vandebron Energie",
   "codeowners": ["@epodegrid"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["auth"],
   "documentation": "https://github.com/epodegrid/vandebron_energie_homeasssistant",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/epodegrid/vandebron_energie_homeasssistant/issues",

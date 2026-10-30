@@ -1,6 +1,7 @@
 """Vandebron Energie async API client.
 
-Auth flow: Keycloak OIDC with username/password, yields a Bearer access token.
+Auth: the caller supplies a Keycloak OIDC Bearer access token (obtained via the
+OAuth2 authorization code + PKCE flow, so accounts with 2FA work).
 All data calls use that token against the mijn.vandebron.nl API.
 """
 from __future__ import annotations
@@ -24,7 +25,6 @@ def is_nl_peak_hour() -> bool:
         return False
     return 7 <= now.hour < 23
 
-_TOKEN_URL = "https://vandebron.nl/auth/realms/vandebron/protocol/openid-connect/token"
 _USER_INFO_URL = "https://mijn.vandebron.nl/api/authentication/userinfo"
 _ENERGY_CONSUMERS_URL = "https://mijn.vandebron.nl/api/v1/energyConsumers/{org_id}"
 _USAGE_URL = "https://mijn.vandebron.nl/api/consumers/{user_id}/connections/{conn_id}/usage"
@@ -82,21 +82,14 @@ class VandebronApiError(Exception):
 
 
 class VandebronAuthError(VandebronApiError):
-    """Authentication failed (bad credentials or unexpected auth response)."""
+    """Authentication failed (token rejected or unexpected auth response)."""
 
 
 class VandebronApi:
     """Async client for the Vandebron mijn.vandebron.nl API."""
 
-    def __init__(
-        self,
-        session: aiohttp.ClientSession,
-        username: str,
-        password: str,
-    ) -> None:
+    def __init__(self, session: aiohttp.ClientSession) -> None:
         self._session = session
-        self._username = username
-        self._password = password
         self._token: str | None = None
         self._user_id: str | None = None
         self._org_id: str | None = None
@@ -109,37 +102,23 @@ class VandebronApi:
     # Authentication
     # ------------------------------------------------------------------
 
-    async def authenticate(self) -> None:
-        """Authenticate via OIDC direct password grant. Populates self._token."""
-        async with self._session.post(
-            _TOKEN_URL,
-            data={
-                "grant_type": "password",
-                "client_id": "website",
-                "username": self._username,
-                "password": self._password,
-                "scope": "openid",
-            },
-        ) as resp:
-            if resp.status in (401, 403):
-                raise VandebronAuthError("Invalid Vandebron credentials")
-            resp.raise_for_status()
-            data = await resp.json()
+    def set_token(self, token: str) -> None:
+        """Set the Bearer access token used for all calls."""
+        self._token = token
 
-        if "access_token" not in data:
-            raise VandebronAuthError("Token endpoint did not return an access_token")
-        self._token = str(data["access_token"])
-        await self._fetch_user_info()
-
-    async def _fetch_user_info(self) -> None:
+    async def fetch_user_info(self) -> dict[str, Any]:
+        """Fetch userinfo and store the user and organisation ids."""
         async with self._session.get(
             _USER_INFO_URL, headers=self._auth_headers
         ) as resp:
+            if resp.status in (401, 403):
+                raise VandebronAuthError("Vandebron rejected the access token")
             resp.raise_for_status()
             data = await resp.json()
 
         self._user_id = data["id"]
         self._org_id = data["organizationId"]
+        return data
 
     # ------------------------------------------------------------------
     # Costs

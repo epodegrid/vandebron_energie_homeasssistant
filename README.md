@@ -7,7 +7,12 @@
 
 A Home Assistant integration for [Vandebron](https://vandebron.nl) energy data.
 
-> **Note:** This is an unofficial integration. Vandebron is not affiliated with this project.
+> [!WARNING]
+> **Not officially supported — use at your own risk.** This is an unofficial community
+> integration. Vandebron does not provide support for it and does not guarantee that it will
+> keep working. It logs in through a public OAuth client (`home-assistant`) on Vandebron's
+> identity provider and uses the same API as mijn.vandebron.nl, and either may change or be
+> withdrawn at any time without notice.
 
 ## Features
 
@@ -33,7 +38,16 @@ A Home Assistant integration for [Vandebron](https://vandebron.nl) energy data.
 
 1. Go to **Settings** → **Devices & Services** → **Add Integration**.
 2. Search for **Vandebron Energie**.
-3. Enter your email address and password.
+3. You are sent to the Vandebron login page. Log in there, including the two-factor code
+   if your account requires it, and you are returned to Home Assistant.
+
+The login redirects via [My Home Assistant](https://my.home-assistant.io), so set your
+Home Assistant URL there first. Your password is never stored, only OAuth tokens.
+
+### Upgrading from a password-based setup
+
+Existing entries show a re-authentication prompt (**Settings** → **Devices & Services**).
+Log in once in the browser; the old stored password is removed afterwards.
 
 ## Development
 

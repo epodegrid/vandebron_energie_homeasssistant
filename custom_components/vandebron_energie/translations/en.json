@@ -1,22 +1,31 @@
 {
   "config": {
     "step": {
-      "user": {
-        "title": "Connect to Vandebron",
-        "description": "Enter the same username and password you use to log in to mijn.vandebron.nl.",
-        "data": {
-          "username": "Email address",
-          "password": "Password"
-        }
+      "pick_implementation": {
+        "title": "Connect to Vandebron"
+      },
+      "reauth_confirm": {
+        "title": "Log in to Vandebron again",
+        "description": "Vandebron now requires a browser login (with two-factor authentication). Log in again to keep this integration working."
       }
     },
-    "error": {
-      "cannot_connect": "Failed to connect to Vandebron. Check your internet connection.",
-      "invalid_auth": "Invalid email address or password.",
-      "unknown": "Unexpected error. Check the Home Assistant logs for details."
-    },
     "abort": {
-      "already_configured": "This Vandebron account is already configured."
+      "already_configured": "This Vandebron account is already configured.",
+      "reauth_successful": "Logged in again successfully.",
+      "wrong_account": "You logged in with a different Vandebron account than the one configured.",
+      "invalid_auth": "Vandebron rejected the login. Try again.",
+      "cannot_connect": "Failed to connect to Vandebron. Check your internet connection.",
+      "authorize_url_timeout": "Timeout generating the login URL.",
+      "missing_configuration": "The integration is not configured. Restart Home Assistant and try again.",
+      "no_url_available": "No URL available. Set your external or internal URL in Home Assistant, or enable My Home Assistant.",
+      "oauth_error": "Received invalid token data.",
+      "oauth_failed": "Error while obtaining the access token.",
+      "oauth_timeout": "Timeout while obtaining the access token.",
+      "oauth_unauthorized": "Authorization error while obtaining the access token.",
+      "user_rejected_authorize": "Login was rejected: {error}"
+    },
+    "create_entry": {
+      "default": "Successfully logged in to Vandebron."
     }
   },
   "options": {
